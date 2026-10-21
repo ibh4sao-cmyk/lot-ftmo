@@ -1,5 +1,5 @@
 // Service worker: cache để app chạy offline. Đổi số phiên bản khi cập nhật file.
-const CACHE = "lotftmo-v1";
+const CACHE = "lotftmo-v2";
 const FILES = ["./", "./index.html", "./manifest.json", "./icon-192.png", "./icon-512.png", "./icon-maskable-512.png"];
 self.addEventListener("install", e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(FILES)).then(() => self.skipWaiting()));

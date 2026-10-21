@@ -53,6 +53,17 @@
     background: rgba(255,122,89,.12); color: var(--warn); border: 1px solid rgba(255,122,89,.35); }
   .empty { color: var(--muted); font-size: 14px; text-align: center; padding: 8px 0; }
 
+  .seg { display: flex; background: #0f1720; border: 1px solid var(--line); border-radius: 10px; padding: 3px; gap: 3px; }
+  .seg button { flex: 1; border: 0; border-radius: 8px; padding: 10px 6px; font-size: 14px; font-weight: 600;
+    background: transparent; color: var(--muted); cursor: pointer; font-family: inherit; }
+  .seg button.on { background: var(--accent); color: #1a1405; }
+  .calc { margin-top: 12px; padding: 10px 12px; border-radius: 10px; background: #0f1720; border: 1px dashed var(--line);
+    font-size: 14px; line-height: 1.5; color: var(--muted); }
+  .calc b { color: var(--text); font-size: 16px; }
+  .calc .buy { color: var(--good); font-weight: 600; }
+  .calc .sell { color: var(--warn); font-weight: 600; }
+  .calc.err { color: var(--warn); border-color: rgba(255,122,89,.5); }
+
   details summary { cursor: pointer; font-size: 14px; color: var(--muted); list-style: none; }
   details summary::after { content: " ▾"; }
   details[open] summary::after { content: " ▴"; }
@@ -76,6 +87,13 @@
       <input id="risk" type="text" inputmode="decimal" autocomplete="off" placeholder="VD: 50">
     </div>
     <div class="field">
+      <label>Cách nhập khoảng giá tới SL</label>
+      <div class="seg">
+        <button type="button" id="tabDist" class="on">Nhập khoảng giá</button>
+        <button type="button" id="tabEntry">Nhập Entry &amp; SL</button>
+      </div>
+    </div>
+    <div class="field" id="boxDist">
       <label for="dist" id="distLabel">Khoảng giá tới SL</label>
       <input id="dist" type="text" inputmode="decimal" autocomplete="off" placeholder="VD: 20">
       <div id="modeWrap" class="hint" style="display:none">
@@ -83,10 +101,23 @@
       </div>
       <div class="hint" id="distHint"></div>
     </div>
+    <div class="field" id="boxEntry" style="display:none">
+      <div class="row">
+        <div>
+          <label for="entry">Điểm Entry</label>
+          <input id="entry" type="text" inputmode="decimal" autocomplete="off">
+        </div>
+        <div>
+          <label for="sl">Điểm SL</label>
+          <input id="sl" type="text" inputmode="decimal" autocomplete="off">
+        </div>
+      </div>
+      <div class="calc" id="entryInfo"></div>
+    </div>
   </section>
 
   <section class="card" id="out" aria-live="polite">
-    <div class="empty">Nhập tiền lỗ và khoảng giá tới SL để tính lot</div>
+    <div class="empty">Nhập đủ thông tin để tính lot</div>
   </section>
 
   <section class="card">
@@ -121,20 +152,20 @@
 var PAIRS = {
   XAUUSD: { name: "XAUUSD (Vàng)",  contract: 100,    cUnit: "ounce",  step: 0.01,
             modes: [{ id: "price", label: "giá ($)", size: 1 }],
-            ex: "Vàng tăng/giảm 20 giá → nhập 20" },
+            ex: "Vàng tăng/giảm 20 giá → nhập 20", ePh: "2650.5", sPh: "2630.5" },
   USOIL:  { name: "USOIL (Dầu WTI)", contract: 1000,  cUnit: "thùng", step: 0.01,
             modes: [{ id: "price", label: "giá ($)", size: 1 }],
-            ex: "Dầu chạy 1.5 giá → nhập 1.5" },
+            ex: "Dầu chạy 1.5 giá → nhập 1.5", ePh: "75.20", sPh: "73.70" },
   BTCUSD: { name: "BTCUSD (Bitcoin)", contract: 1,    cUnit: "BTC",   step: 0.01,
             modes: [{ id: "price", label: "giá ($)", size: 1 }],
-            ex: "BTC chạy 500 giá → nhập 500" },
+            ex: "BTC chạy 500 giá → nhập 500", ePh: "68000", sPh: "67500" },
   EURUSD: { name: "EURUSD",          contract: 100000, cUnit: "EUR",  step: 0.01,
             modes: [{ id: "pip", label: "pip", size: 0.0001 }, { id: "price", label: "giá", size: 1 }],
-            ex: "50 pip → nhập 50 (hoặc đổi sang đơn vị giá: 0.0050)" }
+            ex: "50 pip → nhập 50 (hoặc đổi sang đơn vị giá: 0.0050)", ePh: "1.0850", sPh: "1.0800", pip: 0.0001 }
 };
 
 var $ = function (id) { return document.getElementById(id); };
-var state = { pair: "XAUUSD", mode: {}, cfg: {}, risk: "", dist: "" };
+var state = { pair: "XAUUSD", mode: {}, cfg: {}, risk: "", dist: "", input: "dist", entry: "", sl: "" };
 
 function load() {
   try {
@@ -144,6 +175,9 @@ function load() {
     if (s.cfg) state.cfg = s.cfg;
     state.risk = s.risk || "";
     state.dist = s.dist || "";
+    state.input = s.input === "entry" ? "entry" : "dist";
+    state.entry = s.entry || "";
+    state.sl = s.sl || "";
   } catch (e) {}
 }
 function save() {
@@ -196,15 +230,53 @@ function calcLot(risk, distPrice, contract, step) {
   };
 }
 
+function fmtNum(x) {
+  return x.toFixed(8).replace(/0+$/, "").replace(/\.$/, "");
+}
+
+// Lấy khoảng giá (đơn vị giá thật) theo chế độ nhập đang chọn.
+// Trả về { val, info, err }: val > 0 khi hợp lệ; info là dòng hiển thị cho chế độ Entry & SL.
+function getDist() {
+  var p = PAIRS[state.pair], m = modeOf(state.pair);
+  if (state.input === "dist") {
+    var d = num(state.dist);
+    return { val: d > 0 ? d * m.size : NaN, info: "", err: "" };
+  }
+  var e = num(state.entry), s = num(state.sl);
+  if (!(e > 0) || !(s > 0)) {
+    return { val: NaN, info: "Nhập điểm Entry và điểm SL để tự tính khoảng giá.", err: "" };
+  }
+  if (e === s) {
+    return { val: NaN, info: "", err: "Entry và SL đang trùng nhau, khoảng giá bằng 0." };
+  }
+  var val = Math.round(Math.abs(e - s) * 1e10) / 1e10;   // khử sai số số thực
+  var side = s < e ? '<span class="buy">Lệnh Mua (SL thấp hơn Entry)</span>'
+                   : '<span class="sell">Lệnh Bán (SL cao hơn Entry)</span>';
+  var info = 'Khoảng giá tới SL: <b>' + fmtNum(val) + '</b>';
+  if (p.pip) info += ' (' + fmtNum(Math.round(val / p.pip * 100) / 100) + ' pip)';
+  info += '<br>' + side;
+  return { val: val, info: info, err: "" };
+}
+
 function render() {
-  var p = PAIRS[state.pair], c = cfgOf(state.pair), m = modeOf(state.pair);
-  var risk = num(state.risk), dist = num(state.dist);
+  var c = cfgOf(state.pair);
+  var risk = num(state.risk);
+  var d = getDist();
   var out = $("out");
-  if (!(risk > 0) || !(dist > 0)) {
-    out.innerHTML = '<div class="empty">Nhập tiền lỗ và khoảng giá tới SL để tính lot</div>';
+
+  var box = $("entryInfo");
+  box.className = "calc" + (d.err ? " err" : "");
+  box.innerHTML = d.err || d.info;
+
+  if (d.err) {
+    out.innerHTML = '<div class="warn" style="margin-top:0">' + d.err + ' Hãy kiểm tra lại điểm SL.</div>';
     return;
   }
-  var r = calcLot(risk, dist * m.size, c.contract, c.step);
+  if (!(risk > 0) || !(d.val > 0)) {
+    out.innerHTML = '<div class="empty">Nhập đủ thông tin để tính lot</div>';
+    return;
+  }
+  var r = calcLot(risk, d.val, c.contract, c.step);
   var dec = decimals(c.step);
   var html = '<div class="results">';
   html += '<div class="res main"><h2>Chuẩn (chính xác)</h2>' +
@@ -229,6 +301,14 @@ function render() {
   out.innerHTML = html;
 }
 
+function applyInputMode() {
+  var isEntry = state.input === "entry";
+  $("boxDist").style.display = isEntry ? "none" : "block";
+  $("boxEntry").style.display = isEntry ? "block" : "none";
+  $("tabDist").className = isEntry ? "" : "on";
+  $("tabEntry").className = isEntry ? "on" : "";
+}
+
 function fillPair() {
   var p = PAIRS[state.pair], c = cfgOf(state.pair), m = modeOf(state.pair);
   $("contractLabel").textContent = "1 lot = (" + p.cUnit + ")";
@@ -241,6 +321,8 @@ function fillPair() {
   $("modeWrap").style.display = p.modes.length > 1 ? "block" : "none";
   $("distLabel").textContent = "Khoảng giá tới SL – tính theo " + m.label;
   $("distHint").textContent = p.ex;
+  $("entry").placeholder = "VD: " + p.ePh;
+  $("sl").placeholder = "VD: " + p.sPh;
 }
 
 function init() {
@@ -252,12 +334,19 @@ function init() {
   sel.value = state.pair;
   $("risk").value = state.risk;
   $("dist").value = state.dist;
+  $("entry").value = state.entry;
+  $("sl").value = state.sl;
   fillPair();
+  applyInputMode();
   render();
 
   sel.addEventListener("change", function () { state.pair = sel.value; fillPair(); save(); render(); });
   $("risk").addEventListener("input", function (e) { state.risk = e.target.value; save(); render(); });
   $("dist").addEventListener("input", function (e) { state.dist = e.target.value; save(); render(); });
+  $("entry").addEventListener("input", function (e) { state.entry = e.target.value; save(); render(); });
+  $("sl").addEventListener("input", function (e) { state.sl = e.target.value; save(); render(); });
+  $("tabDist").addEventListener("click", function () { state.input = "dist"; applyInputMode(); save(); render(); });
+  $("tabEntry").addEventListener("click", function () { state.input = "entry"; applyInputMode(); save(); render(); });
   $("mode").addEventListener("change", function (e) { state.mode[state.pair] = e.target.value; fillPair(); save(); render(); });
   function cfgInput(key) {
     return function (e) {
