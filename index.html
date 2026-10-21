@@ -62,6 +62,10 @@
   .calc b { color: var(--text); font-size: 16px; }
   .calc .buy { color: var(--good); font-weight: 600; }
   .calc .sell { color: var(--warn); font-weight: 600; }
+  .v.good { color: var(--good); }
+  .rr { margin-top: 12px; padding: 10px 12px; border-radius: 10px; background: #0f1720; border: 1px solid var(--line);
+    font-size: 14px; color: var(--muted); text-align: center; }
+  .rr b { color: var(--accent); font-size: 20px; margin-left: 4px; }
   .calc.err { color: var(--warn); border-color: rgba(255,122,89,.5); }
 
   details summary { cursor: pointer; font-size: 14px; color: var(--muted); list-style: none; }
@@ -100,6 +104,10 @@
         Đơn vị: <select id="mode" style="width:auto;font-size:14px;padding:6px 10px;display:inline-block"></select>
       </div>
       <div class="hint" id="distHint"></div>
+      <div style="margin-top:16px">
+        <label for="tpd" id="tpdLabel">Khoảng giá tới TP (không bắt buộc)</label>
+        <input id="tpd" type="text" inputmode="decimal" autocomplete="off">
+      </div>
     </div>
     <div class="field" id="boxEntry" style="display:none">
       <div class="row">
@@ -111,6 +119,10 @@
           <label for="sl">Điểm SL</label>
           <input id="sl" type="text" inputmode="decimal" autocomplete="off">
         </div>
+      </div>
+      <div style="margin-top:14px">
+        <label for="tpp">Điểm TP (không bắt buộc)</label>
+        <input id="tpp" type="text" inputmode="decimal" autocomplete="off">
       </div>
       <div class="calc" id="entryInfo"></div>
     </div>
@@ -152,20 +164,20 @@
 var PAIRS = {
   XAUUSD: { name: "XAUUSD (Vàng)",  contract: 100,    cUnit: "ounce",  step: 0.01,
             modes: [{ id: "price", label: "giá ($)", size: 1 }],
-            ex: "Vàng tăng/giảm 20 giá → nhập 20", ePh: "2650.5", sPh: "2630.5" },
+            ex: "Vàng tăng/giảm 20 giá → nhập 20", ePh: "2650.5", sPh: "2630.5", tPh: "2700.5", tdPh: "50" },
   USOIL:  { name: "USOIL (Dầu WTI)", contract: 1000,  cUnit: "thùng", step: 0.01,
             modes: [{ id: "price", label: "giá ($)", size: 1 }],
-            ex: "Dầu chạy 1.5 giá → nhập 1.5", ePh: "75.20", sPh: "73.70" },
+            ex: "Dầu chạy 1.5 giá → nhập 1.5", ePh: "75.20", sPh: "73.70", tPh: "78.95", tdPh: "3.75" },
   BTCUSD: { name: "BTCUSD (Bitcoin)", contract: 1,    cUnit: "BTC",   step: 0.01,
             modes: [{ id: "price", label: "giá ($)", size: 1 }],
-            ex: "BTC chạy 500 giá → nhập 500", ePh: "68000", sPh: "67500" },
+            ex: "BTC chạy 500 giá → nhập 500", ePh: "68000", sPh: "67500", tPh: "69250", tdPh: "1250" },
   EURUSD: { name: "EURUSD",          contract: 100000, cUnit: "EUR",  step: 0.01,
             modes: [{ id: "pip", label: "pip", size: 0.0001 }, { id: "price", label: "giá", size: 1 }],
-            ex: "50 pip → nhập 50 (hoặc đổi sang đơn vị giá: 0.0050)", ePh: "1.0850", sPh: "1.0800", pip: 0.0001 }
+            ex: "50 pip → nhập 50 (hoặc đổi sang đơn vị giá: 0.0050)", ePh: "1.0850", sPh: "1.0800", tPh: "1.0975", tdPh: "125", pip: 0.0001 }
 };
 
 var $ = function (id) { return document.getElementById(id); };
-var state = { pair: "XAUUSD", mode: {}, cfg: {}, risk: "", dist: "", input: "dist", entry: "", sl: "" };
+var state = { pair: "XAUUSD", mode: {}, cfg: {}, risk: "", dist: "", input: "dist", entry: "", sl: "", tpd: "", tpp: "" };
 
 function load() {
   try {
@@ -178,6 +190,8 @@ function load() {
     state.input = s.input === "entry" ? "entry" : "dist";
     state.entry = s.entry || "";
     state.sl = s.sl || "";
+    state.tpd = s.tpd || "";
+    state.tpp = s.tpp || "";
   } catch (e) {}
 }
 function save() {
@@ -234,28 +248,43 @@ function fmtNum(x) {
   return x.toFixed(8).replace(/0+$/, "").replace(/\.$/, "");
 }
 
-// Lấy khoảng giá (đơn vị giá thật) theo chế độ nhập đang chọn.
-// Trả về { val, info, err }: val > 0 khi hợp lệ; info là dòng hiển thị cho chế độ Entry & SL.
+// Lấy khoảng giá tới SL và tới TP (đơn vị giá thật) theo chế độ nhập đang chọn.
+// Trả về { val, info, err, tpVal, tpErr }.
+// val/tpVal > 0 khi hợp lệ; info là phần hiển thị cho chế độ Entry & SL.
 function getDist() {
   var p = PAIRS[state.pair], m = modeOf(state.pair);
   if (state.input === "dist") {
-    var d = num(state.dist);
-    return { val: d > 0 ? d * m.size : NaN, info: "", err: "" };
+    var d = num(state.dist), t = num(state.tpd);
+    return { val: d > 0 ? d * m.size : NaN, info: "", err: "",
+             tpVal: t > 0 ? t * m.size : NaN, tpErr: "" };
   }
-  var e = num(state.entry), s = num(state.sl);
+  var e = num(state.entry), s = num(state.sl), t = num(state.tpp);
   if (!(e > 0) || !(s > 0)) {
-    return { val: NaN, info: "Nhập điểm Entry và điểm SL để tự tính khoảng giá.", err: "" };
+    return { val: NaN, info: "Nhập điểm Entry và điểm SL để tự tính khoảng giá.", err: "", tpVal: NaN, tpErr: "" };
   }
   if (e === s) {
-    return { val: NaN, info: "", err: "Entry và SL đang trùng nhau, khoảng giá bằng 0." };
+    return { val: NaN, info: "", err: "Entry và SL đang trùng nhau, khoảng giá bằng 0.", tpVal: NaN, tpErr: "" };
   }
-  var val = Math.round(Math.abs(e - s) * 1e10) / 1e10;   // khử sai số số thực
-  var side = s < e ? '<span class="buy">Lệnh Mua (SL thấp hơn Entry)</span>'
+  var round10 = function (x) { return Math.round(x * 1e10) / 1e10; };   // khử sai số số thực
+  var val = round10(Math.abs(e - s));
+  var isBuy = s < e;
+  var side = isBuy ? '<span class="buy">Lệnh Mua (SL thấp hơn Entry)</span>'
                    : '<span class="sell">Lệnh Bán (SL cao hơn Entry)</span>';
-  var info = 'Khoảng giá tới SL: <b>' + fmtNum(val) + '</b>';
-  if (p.pip) info += ' (' + fmtNum(Math.round(val / p.pip * 100) / 100) + ' pip)';
+  var pipTxt = function (x) { return p.pip ? ' (' + fmtNum(Math.round(x / p.pip * 100) / 100) + ' pip)' : ''; };
+  var info = 'Khoảng giá tới SL: <b>' + fmtNum(val) + '</b>' + pipTxt(val);
+
+  var tpVal = NaN, tpErr = "";
+  if (t > 0) {
+    if (t === e) tpErr = "TP trùng Entry, khoảng giá tới TP bằng 0.";
+    else if (isBuy && t < e) tpErr = "TP đang thấp hơn Entry, cùng phía với SL. Lệnh Mua cần TP cao hơn Entry.";
+    else if (!isBuy && t > e) tpErr = "TP đang cao hơn Entry, cùng phía với SL. Lệnh Bán cần TP thấp hơn Entry.";
+    else {
+      tpVal = round10(Math.abs(t - e));
+      info += '<br>Khoảng giá tới TP: <b>' + fmtNum(tpVal) + '</b>' + pipTxt(tpVal);
+    }
+  }
   info += '<br>' + side;
-  return { val: val, info: info, err: "" };
+  return { val: val, info: info, err: "", tpVal: tpVal, tpErr: tpErr };
 }
 
 function render() {
@@ -278,16 +307,25 @@ function render() {
   }
   var r = calcLot(risk, d.val, c.contract, c.step);
   var dec = decimals(c.step);
+  var hasTp = d.tpVal > 0;
+  var tpRow = function (lot) {
+    return hasTp ? '<div class="k">TP dự kiến</div><div class="v sm good">+' + fmtUsd(lot * d.tpVal * c.contract) + '</div>' : '';
+  };
   var html = '<div class="results">';
   html += '<div class="res main"><h2>Chuẩn (chính xác)</h2>' +
           '<div class="k">Lot</div><div class="v">' + fmtLot(r.exact, dec) + '</div>' +
           '<div class="k">SL dự kiến</div><div class="v sm">' + fmtUsd(r.exactLoss) + '</div>' +
-          '</div>';
+          tpRow(r.exact) + '</div>';
   html += '<div class="res"><h2>Làm tròn xuống</h2>' +
           '<div class="k">Lot</div><div class="v">' + r.rounded.toFixed(dec) + '</div>' +
           '<div class="k">SL dự kiến</div><div class="v sm">' + fmtUsd(r.roundedLoss) + '</div>' +
-          '</div>';
+          tpRow(r.rounded) + '</div>';
   html += '</div>';
+  if (hasTp) {
+    var rr = d.tpVal / d.val;
+    html += '<div class="rr">Tỷ lệ R:R<b>1 : ' + fmtNum(Math.round(rr * 100) / 100) + '</b></div>';
+  }
+  if (d.tpErr) html += '<div class="warn">' + d.tpErr + '</div>';
   if (r.rounded > 0) {
     var gap = r.exactLoss - r.roundedLoss;
     html += '<div class="diff ok">' + (gap < 0.005
@@ -323,6 +361,9 @@ function fillPair() {
   $("distHint").textContent = p.ex;
   $("entry").placeholder = "VD: " + p.ePh;
   $("sl").placeholder = "VD: " + p.sPh;
+  $("tpp").placeholder = "VD: " + p.tPh;
+  $("tpd").placeholder = "VD: " + p.tdPh;
+  $("tpdLabel").textContent = "Khoảng giá tới TP – tính theo " + m.label + " (không bắt buộc)";
 }
 
 function init() {
@@ -336,6 +377,8 @@ function init() {
   $("dist").value = state.dist;
   $("entry").value = state.entry;
   $("sl").value = state.sl;
+  $("tpd").value = state.tpd;
+  $("tpp").value = state.tpp;
   fillPair();
   applyInputMode();
   render();
@@ -345,6 +388,8 @@ function init() {
   $("dist").addEventListener("input", function (e) { state.dist = e.target.value; save(); render(); });
   $("entry").addEventListener("input", function (e) { state.entry = e.target.value; save(); render(); });
   $("sl").addEventListener("input", function (e) { state.sl = e.target.value; save(); render(); });
+  $("tpd").addEventListener("input", function (e) { state.tpd = e.target.value; save(); render(); });
+  $("tpp").addEventListener("input", function (e) { state.tpp = e.target.value; save(); render(); });
   $("tabDist").addEventListener("click", function () { state.input = "dist"; applyInputMode(); save(); render(); });
   $("tabEntry").addEventListener("click", function () { state.input = "entry"; applyInputMode(); save(); render(); });
   $("mode").addEventListener("change", function (e) { state.mode[state.pair] = e.target.value; fillPair(); save(); render(); });
