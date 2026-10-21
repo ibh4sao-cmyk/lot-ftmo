@@ -1,0 +1,277 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f1720">
+<title>Tính Lot FTMO</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<style>
+  :root {
+    --bg: #0f1720;
+    --card: #17212c;
+    --line: #26323f;
+    --text: #e8eef4;
+    --muted: #8a9aab;
+    --accent: #f5b942;
+    --good: #4cc38a;
+    --warn: #ff7a59;
+    --radius: 14px;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; background: var(--bg); color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  body { padding: max(16px, env(safe-area-inset-top)) 16px 32px; }
+  main { max-width: 480px; margin: 0 auto; }
+  h1 { font-size: 20px; margin: 4px 0 16px; letter-spacing: .2px; }
+  h1 span { color: var(--accent); }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; margin-bottom: 14px; }
+  label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+  .field { margin-bottom: 14px; }
+  .field:last-child { margin-bottom: 0; }
+  input, select { width: 100%; font-size: 20px; padding: 12px 14px; border-radius: 10px;
+    border: 1px solid var(--line); background: #0f1720; color: var(--text); outline: none; }
+  input:focus, select:focus { border-color: var(--accent); }
+  .hint { font-size: 12px; color: var(--muted); margin-top: 6px; }
+  .row { display: flex; gap: 10px; }
+  .row > * { flex: 1; min-width: 0; }
+
+  .results { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .res { border: 1px solid var(--line); border-radius: 12px; padding: 12px; background: #0f1720; }
+  .res.main { border-color: var(--accent); }
+  .res h2 { font-size: 12px; font-weight: 600; color: var(--muted); margin: 0 0 10px; text-transform: uppercase; letter-spacing: .6px; }
+  .res.main h2 { color: var(--accent); }
+  .k { font-size: 12px; color: var(--muted); margin-top: 8px; }
+  .v { font-size: 26px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.15; }
+  .v.sm { font-size: 20px; }
+  .unit { font-size: 13px; font-weight: 500; color: var(--muted); margin-left: 3px; }
+  .diff { font-size: 12px; margin-top: 10px; color: var(--muted); }
+  .diff.ok { color: var(--good); }
+  .warn { margin-top: 12px; padding: 10px 12px; border-radius: 10px; font-size: 13px;
+    background: rgba(255,122,89,.12); color: var(--warn); border: 1px solid rgba(255,122,89,.35); }
+  .empty { color: var(--muted); font-size: 14px; text-align: center; padding: 8px 0; }
+
+  details summary { cursor: pointer; font-size: 14px; color: var(--muted); list-style: none; }
+  details summary::after { content: " ▾"; }
+  details[open] summary::after { content: " ▴"; }
+  details .inner { margin-top: 14px; }
+  input.small { font-size: 16px; padding: 10px 12px; }
+  .formula { font-size: 12px; color: var(--muted); line-height: 1.5; }
+  .formula code { color: var(--text); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Tính <span>Lot</span> vào lệnh</h1>
+
+  <section class="card">
+    <div class="field">
+      <label for="pair">Cặp giao dịch</label>
+      <select id="pair"></select>
+    </div>
+    <div class="field">
+      <label for="risk">Số tiền lỗ dự kiến khi chạm SL ($)</label>
+      <input id="risk" type="text" inputmode="decimal" autocomplete="off" placeholder="VD: 50">
+    </div>
+    <div class="field">
+      <label for="dist" id="distLabel">Khoảng giá tới SL</label>
+      <input id="dist" type="text" inputmode="decimal" autocomplete="off" placeholder="VD: 20">
+      <div id="modeWrap" class="hint" style="display:none">
+        Đơn vị: <select id="mode" style="width:auto;font-size:14px;padding:6px 10px;display:inline-block"></select>
+      </div>
+      <div class="hint" id="distHint"></div>
+    </div>
+  </section>
+
+  <section class="card" id="out" aria-live="polite">
+    <div class="empty">Nhập tiền lỗ và khoảng giá tới SL để tính lot</div>
+  </section>
+
+  <section class="card">
+    <details>
+      <summary>Thông số của cặp (chỉnh theo sàn của bạn)</summary>
+      <div class="inner">
+        <div class="row">
+          <div class="field">
+            <label for="contract" id="contractLabel">1 lot =</label>
+            <input id="contract" class="small" type="text" inputmode="decimal">
+          </div>
+          <div class="field">
+            <label for="step">Bước lot</label>
+            <input id="step" class="small" type="text" inputmode="decimal">
+          </div>
+        </div>
+        <div class="hint">Contract size và bước lot khác nhau tuỳ sàn/tài khoản. Hãy đối chiếu với Specification của cặp trên MT5 rồi chỉnh ở đây. Giá trị được lưu lại trên máy.</div>
+        <p class="formula" style="margin-top:14px">
+          <b>Công thức</b> (cặp định giá bằng USD):<br>
+          <code>Lot = Tiền lỗ ÷ (Khoảng giá × Contract size)</code><br>
+          <code>Lỗ thực tế = Lot làm tròn × Khoảng giá × Contract size</code><br>
+          Lot làm tròn luôn <b>làm tròn xuống</b> theo bước lot để lỗ không vượt mức bạn đặt.
+        </p>
+      </div>
+    </details>
+  </section>
+</main>
+
+<script>
+// Cấu hình mặc định từng cặp. Chỉ hỗ trợ cặp có đồng định giá là USD.
+// modes: cách nhập khoảng giá; size = giá trị 1 đơn vị nhập tính ra khoảng giá thật.
+var PAIRS = {
+  XAUUSD: { name: "XAUUSD (Vàng)",  contract: 100,    cUnit: "ounce",  step: 0.01,
+            modes: [{ id: "price", label: "giá ($)", size: 1 }],
+            ex: "Vàng tăng/giảm 20 giá → nhập 20" },
+  USOIL:  { name: "USOIL (Dầu WTI)", contract: 1000,  cUnit: "thùng", step: 0.01,
+            modes: [{ id: "price", label: "giá ($)", size: 1 }],
+            ex: "Dầu chạy 1.5 giá → nhập 1.5" },
+  BTCUSD: { name: "BTCUSD (Bitcoin)", contract: 1,    cUnit: "BTC",   step: 0.01,
+            modes: [{ id: "price", label: "giá ($)", size: 1 }],
+            ex: "BTC chạy 500 giá → nhập 500" },
+  EURUSD: { name: "EURUSD",          contract: 100000, cUnit: "EUR",  step: 0.01,
+            modes: [{ id: "pip", label: "pip", size: 0.0001 }, { id: "price", label: "giá", size: 1 }],
+            ex: "50 pip → nhập 50 (hoặc đổi sang đơn vị giá: 0.0050)" }
+};
+
+var $ = function (id) { return document.getElementById(id); };
+var state = { pair: "XAUUSD", mode: {}, cfg: {}, risk: "", dist: "" };
+
+function load() {
+  try {
+    var s = JSON.parse(localStorage.getItem("lotftmo") || "{}");
+    if (s.pair && PAIRS[s.pair]) state.pair = s.pair;
+    if (s.mode) state.mode = s.mode;
+    if (s.cfg) state.cfg = s.cfg;
+    state.risk = s.risk || "";
+    state.dist = s.dist || "";
+  } catch (e) {}
+}
+function save() {
+  try { localStorage.setItem("lotftmo", JSON.stringify(state)); } catch (e) {}
+}
+
+function num(str) {
+  if (str == null) return NaN;
+  var t = String(str).trim().replace(/\s/g, "").replace(",", ".");
+  if (t === "" || !/^\d*\.?\d*$/.test(t)) return NaN;
+  return parseFloat(t);
+}
+function cfgOf(p) {
+  var c = state.cfg[p] || {};
+  return { contract: c.contract > 0 ? c.contract : PAIRS[p].contract,
+           step: c.step > 0 ? c.step : PAIRS[p].step };
+}
+function modeOf(p) {
+  var id = state.mode[p] || PAIRS[p].modes[0].id;
+  return PAIRS[p].modes.filter(function (m) { return m.id === id; })[0] || PAIRS[p].modes[0];
+}
+function decimals(step) {
+  var s = String(step);
+  if (s.indexOf("e-") > -1) return parseInt(s.split("e-")[1], 10);
+  return (s.split(".")[1] || "").length;
+}
+function fmtLot(x, minDec) {
+  var t = x.toFixed(4).replace(/0+$/, "").replace(/\.$/, "");
+  var d = (t.split(".")[1] || "").length;
+  if (d < minDec) t = x.toFixed(minDec);
+  return t;
+}
+function fmtUsd(x) {
+  return "$" + x.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+// Hàm tính chính: trả về lot chuẩn, lot làm tròn xuống, và lỗ thực tế tương ứng.
+function calcLot(risk, distPrice, contract, step) {
+  var perLot = distPrice * contract;               // lỗ khi vào 1 lot
+  var exact = risk / perLot;                        // lot chuẩn
+  var rounded = Math.floor(exact / step + 1e-9) * step;
+  rounded = Math.round(rounded / step) * step;      // khử sai số số thực
+  return {
+    perLot: perLot,
+    exact: exact,
+    exactLoss: exact * perLot,                      // = risk
+    rounded: rounded,
+    roundedLoss: rounded * perLot,
+    minLoss: step * perLot                          // lỗ nếu vào đúng 1 bước lot
+  };
+}
+
+function render() {
+  var p = PAIRS[state.pair], c = cfgOf(state.pair), m = modeOf(state.pair);
+  var risk = num(state.risk), dist = num(state.dist);
+  var out = $("out");
+  if (!(risk > 0) || !(dist > 0)) {
+    out.innerHTML = '<div class="empty">Nhập tiền lỗ và khoảng giá tới SL để tính lot</div>';
+    return;
+  }
+  var r = calcLot(risk, dist * m.size, c.contract, c.step);
+  var dec = decimals(c.step);
+  var html = '<div class="results">';
+  html += '<div class="res main"><h2>Chuẩn (chính xác)</h2>' +
+          '<div class="k">Lot</div><div class="v">' + fmtLot(r.exact, dec) + '</div>' +
+          '<div class="k">SL dự kiến</div><div class="v sm">' + fmtUsd(r.exactLoss) + '</div>' +
+          '</div>';
+  html += '<div class="res"><h2>Làm tròn xuống</h2>' +
+          '<div class="k">Lot</div><div class="v">' + r.rounded.toFixed(dec) + '</div>' +
+          '<div class="k">SL dự kiến</div><div class="v sm">' + fmtUsd(r.roundedLoss) + '</div>' +
+          '</div>';
+  html += '</div>';
+  if (r.rounded > 0) {
+    var gap = r.exactLoss - r.roundedLoss;
+    html += '<div class="diff ok">' + (gap < 0.005
+      ? 'Lot làm tròn khớp đúng mức lỗ ' + fmtUsd(risk)
+      : 'Thấp hơn mức bạn đặt ' + fmtUsd(gap) + ' (an toàn, không vượt ' + fmtUsd(risk) + ')') + '</div>';
+  } else {
+    html += '<div class="warn">Lot chuẩn nhỏ hơn bước lot tối thiểu (' + c.step + '). ' +
+            'Vào ' + c.step + ' lot sẽ lỗ ' + fmtUsd(r.minLoss) + ', vượt mức ' + fmtUsd(risk) +
+            '. Hãy tăng tiền lỗ hoặc thu hẹp khoảng SL.</div>';
+  }
+  out.innerHTML = html;
+}
+
+function fillPair() {
+  var p = PAIRS[state.pair], c = cfgOf(state.pair), m = modeOf(state.pair);
+  $("contractLabel").textContent = "1 lot = (" + p.cUnit + ")";
+  $("contract").value = String(c.contract);
+  $("step").value = String(c.step);
+  var ms = $("mode");
+  ms.innerHTML = p.modes.map(function (x) {
+    return '<option value="' + x.id + '"' + (x.id === m.id ? " selected" : "") + ">" + x.label + "</option>";
+  }).join("");
+  $("modeWrap").style.display = p.modes.length > 1 ? "block" : "none";
+  $("distLabel").textContent = "Khoảng giá tới SL – tính theo " + m.label;
+  $("distHint").textContent = p.ex;
+}
+
+function init() {
+  load();
+  var sel = $("pair");
+  sel.innerHTML = Object.keys(PAIRS).map(function (k) {
+    return '<option value="' + k + '">' + PAIRS[k].name + "</option>";
+  }).join("");
+  sel.value = state.pair;
+  $("risk").value = state.risk;
+  $("dist").value = state.dist;
+  fillPair();
+  render();
+
+  sel.addEventListener("change", function () { state.pair = sel.value; fillPair(); save(); render(); });
+  $("risk").addEventListener("input", function (e) { state.risk = e.target.value; save(); render(); });
+  $("dist").addEventListener("input", function (e) { state.dist = e.target.value; save(); render(); });
+  $("mode").addEventListener("change", function (e) { state.mode[state.pair] = e.target.value; fillPair(); save(); render(); });
+  function cfgInput(key) {
+    return function (e) {
+      var v = num(e.target.value);
+      state.cfg[state.pair] = state.cfg[state.pair] || {};
+      if (v > 0) state.cfg[state.pair][key] = v; else delete state.cfg[state.pair][key];
+      save(); render();
+    };
+  }
+  $("contract").addEventListener("input", cfgInput("contract"));
+  $("step").addEventListener("input", cfgInput("step"));
+}
+init();
+if ("serviceWorker" in navigator) { window.addEventListener("load", function () { navigator.serviceWorker.register("sw.js").catch(function () {}); }); }
+</script>
+</body>
+</html>
